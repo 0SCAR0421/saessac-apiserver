@@ -8,7 +8,7 @@ const app = express();
 const port = process.env.PORT || 80;
 
 app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
+app.use(express.json())
 app.use(cors())
 
 app.get('/', (req, res) => {
@@ -45,14 +45,14 @@ app.get('/user/list', (req, res) => {
 });
 
 app.get('/user/:id', (req, res) => {
-	connection.query('SELECT * FROM Users where uid=' + req.params.id, (err, row) => {
+	connection.query('SELECT * FROM Users WHERE uid=' + req.params.id, (err, row) => {
     if(err) res.redirect('/error/' + err.code)
     // else res.send(JSON.stringify({...row, msg: 'success'}))
-	// else res.send(JSON.stringify("{\"msg\": \"hello\"}"))
-	else {
-		// JSON.stringify()
-		res.send(JSON.stringify(row))
-	}
+	  // else res.send(JSON.stringify("{\"msg\": \"hello\"}"))
+    else {
+      // JSON.stringify()
+      res.send(JSON.stringify(row))
+    }
 	})
 });
 
@@ -60,7 +60,7 @@ app.put('/user/:id', (req, res) => {
 	let userData = {}
 	const body = req.body
 
-	connection.query('SELECT * FROM Users where uid=' + req.params.id, (err, row) => {
+	connection.query('SELECT * FROM Users WHERE uid=' + req.params.id, (err, row) => {
     if(err) res.redirect('/error/' + err.code)
     else {
 			userData = {
@@ -82,9 +82,9 @@ app.put('/user/:id', (req, res) => {
 })
 
 app.delete('/user/:id', (req, res) => {
-	connection.query('DELETE FROM Users where uid=' + req.params.id, (err, row) => {
-    if(err) res.redirect('/error/' + err.code)
-    else res.send(JSON.stringify(row))
+	connection.query('DELETE FROM Users WHERE uid=' + req.params.id, (err, row) => {
+		if(err) res.redirect('/error/' + err.code)
+		else res.send(JSON.stringify(row))
 	})
 });
 
@@ -98,7 +98,7 @@ app.post('/topic/insert', (req, res) => {
 })
 
 app.get('/topic/list', (req, res) => {
-	let sql = 'select topicTitle, topicContents, userID, locationName from topic left join users on topic.Users_uid = users.uid left join location on topic.location_lid = location.lid'
+	let sql = 'SELECT topicTitle, topicContents, userID, locationName FROM topic LEFT JOIN users ON topic.Users_uid = users.uid LEFT JOIN location ON topic.location_lid = location.lid'
 	connection.query(sql, (err, rows) => {
 		if(err) res.redirect('/error/' + err.code)
 		else res.send(JSON.stringify(rows))
@@ -106,7 +106,7 @@ app.get('/topic/list', (req, res) => {
 })
 
 app.get('/topic/:id', (req, res) => {
-	let sql = `select topicTitle, topicContents, userID, locationName from topic left join users on topic.Users_uid = users.uid left join location on topic.location_lid = location.lid where tid=` + req.params.id
+	let sql = `SELECT topicTitle, topicContents, userID, locationName FROM topic LEFT JOIN users ON topic.Users_uid = users.uid LEFT JOIN location ON topic.location_lid = location.lid WHERE tid=` + req.params.id
 	connection.query(sql, (err, rows) => {
 		if(err) res.redirect('/error/' + err.code)
 		else res.send(JSON.stringify(rows))
@@ -116,5 +116,5 @@ app.get('/topic/:id', (req, res) => {
 // 게시글 작성 완료
 
 app.listen(port, () => {
-	console.log(`server is listening at localhost:${port}`);
+	console.log(`server is listening at localhost:${port}`)
 });

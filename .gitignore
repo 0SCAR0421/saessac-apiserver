@@ -151,4 +151,10 @@ temp/
 # package-lock
 package-lock.json
 
+# src dir
+src/
+
+# .vscode dir
+.vscode/
+
 # End of https://www.toptal.com/developers/gitignore/api/node

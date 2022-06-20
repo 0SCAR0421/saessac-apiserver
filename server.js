@@ -52,13 +52,12 @@ app.post('/user/picture/:id', upload.single('profilepicture'), (req, res, next) 
 		res.json({"msg" : "failed! picture not found"})
 	} else {
 		const { fieldname, originalname, encoding, mimetype, destination, filename, path, size } = req.file
-
 		connection.query('SELECT * FROM Users WHERE uid=' + req.params.id, (err, row) => {
 			if(err) res.redirect('/error/' + err.code)
 			else {
 				if(row.length){
-					if(row[0].userPicture) fs.unlink(row[0].userPicture, () => {console.log('prevPicture delete')})
-					connection.query('UPDATE Users SET userPicture=? WHERE uid=?', [path, req.params.id], (err, row) => {
+					if(row[0].userPicture) fs.unlink(__dirname + row[0].userPicture, () => {console.log('prevPicture delete')})
+					connection.query('UPDATE Users SET userPicture=? WHERE uid=?', [path.slice(30), req.params.id], (err, row) => {
 						if(err) res.redirect('/error/' + err.code)
 						else res.json({"msg" : `success! filename is ${filename}`})
 					})

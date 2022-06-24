@@ -4,11 +4,35 @@ const dbconfig = require('./config/database.js')
 const cors = require('cors')
 const multer = require('multer')
 const fs = require('fs')
-const static = require('serve-static');
+const static = require('serve-static')
+const e = require('express')
 
-const port = process.env.PORT || 80;
-const app = express();
-const connection = mysql.createConnection(dbconfig)
+const port = process.env.PORT || 80
+const app = express()
+let connection
+
+function handleDisconnect() {
+	connection = mysql.createConnection(dbconfig)
+
+	connection.connect(function(err) {
+		if(err) {
+			console.log('error when connecting to db:', err)
+			setTimeout(handleDisconnect, 5000)
+		}
+	});
+
+	connection.on('error', function(err) {
+		console.log('db error', err);
+		if(err.code === 'PROTOCOL_CONNECTION_LOST') {
+			handleDisconnect()
+		} else {
+			throw err
+		}
+	});
+}
+
+handleDisconnect()
+
 const storage = multer.diskStorage({
 	destination: function (req, file, callback) {
 		callback(null, __dirname + '/src/profilepicture/') // 파일 업로드 경로
@@ -21,8 +45,8 @@ const upload = multer({
 	storage
 })
 
-app.use(static(__dirname));
-app.use(express.urlencoded({ extended: true }));
+app.use(static(__dirname))
+app.use(express.urlencoded({ extended: true }))
 app.use(express.json())
 app.use(cors())
 
@@ -34,11 +58,35 @@ app.get('/error/:msg', (req, res) => {
 	res.json({msg: req.params.msg})
 })
 
+app.get('/user/checkid', (req, res) => {
+	console.log(req.query.userid)
+	connection.query(`SELECT COUNT(userID) FROM Users WHERE userID='${req.query.userid}'`, (err, row) => {
+		if(err) res.redirect('/error/' + err.code)
+		else {
+			if(row[0]["COUNT(userID)"] === 0){
+				res.json({msg: true})
+			} else{
+				res.json({msg: false})
+			}
+		}
+	})
+})
+
 app.post('/user/insert', (req, res) => {
 	let body = req.body
-	connection.query(`INSERT INTO Users (userID, userPassword, userPicture) VALUES (?, ?, ?)`, [body.userid, body.userpassword, body.userPicture], (err, row) => {
+	console.log('user insert')
+	connection.query(`SELECT COUNT(userID) FROM Users WHERE userID=?`,[body.userid], (err, row) => {
 		if(err) res.redirect('/error/' + err.code)
-		else res.json({insertId: row.insertId, msg: 'success'})
+		else{
+			if(row[0]["COUNT(userID)"] === 0){
+				connection.query(`INSERT INTO Users (userID, userPassword) VALUES (?, ?)`, [body.userid, body.userpassword], (err, row) => {
+					if(err) res.redirect('/error/' + err.code)
+					else res.json({insertId: row.insertId, msg: 'success'})
+				})
+			}else{
+				res.json({msg: "중복된 아이디 입니다."})
+			}
+		}
 	})
 })
 

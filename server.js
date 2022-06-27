@@ -270,17 +270,73 @@ app.get('/user/list', (req, res) => {
  *              type: object
  *              properties:
  *                uid:
- *                  type: boolean
+ *                  type: number
  *                name:
+ *                  type: string
+ *                userPicture:
+ *                  type: string
+ *                nickName:
+ *                  type: string
+ *                info:
+ *                  type: string
+ *                group_concat(locationName):
  *                  type: string
  */
 
 app.get('/user/:uid', (req, res) => {
-	connection.query('SELECT uid, userID, userPicture FROM Users WHERE uid=' + req.params.uid, (err, row) => {
+	let query = `SELECT uid, userID, userPicture, nickName, info, group_concat(locationName) FROM favoritLocation AS F INNER JOIN Users AS U ON F.Users_uid = U.uid INNER JOIN Location AS L ON F.Location_lid = L.lid WHERE U.uid = ${req.params.uid}`;
+	connection.query(query, (err, row) => {
     if(err) res.redirect('/error/' + err.code)
     else {
-      // JSON.stringify()
 			res.json(row)
+    }
+	})
+});
+
+/**
+ * @swagger
+ * /user/login:
+ *  post:
+ *    summary: "로그인"
+ *    description: "요청 경로에 패치 값을 담아 서버에 보낸다."
+ *    tags: [Users]
+ *    requestBody:
+ *      description: 사용자가 서버로 전달하는 값에 따라 결과 값은 다릅니다. (로그인)
+ *      required: true
+ *      content:
+ *        application/x-www-form-urlencoded:
+ *          schema:
+ *            type: object
+ *            properties:
+ *              userid:
+ *                type: string
+ *                description: "유저 아이디"
+ *              userpassword:
+ *                type: string
+ *                description: "유저 비밀번호"
+ *    responses:
+ *      "200":
+ *        description: 사용자가 서버로 전달하는 값에 따라 결과 값은 다릅니다. (로그인)
+ *        content:
+ *          application/json:
+ *            schema:
+ *              type: object
+ *              properties:
+ *                uid:
+ *                  type: number
+ */
+
+app.post('/user/login', (req, res) => {
+	let body = req.body
+	console.log(body)
+	let query = `SELECT uid FROM Users WHERE userid='${body.userid}' AND userpassword=SHA2('${body.userpassword}', 256)`
+	// let query = `SELECT uid FROM Users WHERE userID='${body.userid}' AND userPassword=SHA2('${body.userpassword}', 256)`;
+	connection.query(query, (err, row) => {
+		console.log(row)
+    if(err) res.redirect('/error/' + err.code)
+    else {
+			if(row.length === 0) res.json({msg: 'failed'})
+			else res.json({uid: row[0].uid, msg: 'success'})
     }
 	})
 });
@@ -289,7 +345,7 @@ app.get('/user/:uid', (req, res) => {
  * @swagger
  * /user/{user_uid}:
  *  put:
- *    summary: "회원 정보 수정"
+ *    summary: "회원정보 수정"
  *    description: "요청 경로에 패치 값과 바디 값을 담아 서버에 보낸다."
  *    tags: [Users]
  *    parameters:
@@ -300,7 +356,76 @@ app.get('/user/:uid', (req, res) => {
  *        schema:
  *          type: number
  *    requestBody:
- *      description: 사용자가 서버로 전달하는 값에 따라 결과 값은 다릅니다. (유저 수정)
+ *      description: 사용자가 서버로 전달하는 값에 따라 결과 값은 다릅니다. (회원정보 수정)
+ *      required: true
+ *      content:
+ *        application/x-www-form-urlencoded:
+ *          schema:
+ *            type: object
+ *            properties:
+ *              nickname:
+ *                type: string
+ *                description: "닉네임"
+ *              info:
+ *                type: string
+ *                description: "자기소개"
+ *    responses:
+ *      "201":
+ *        description: 사용자가 서버로 전달하는 값에 따라 결과 값은 다릅니다. (유저 수정)
+ *        content:
+ *          application/json:
+ *            schema:
+ *              type: object
+ *              properties:
+ *                insertId:
+ *                  type: number
+ *                changedRows:
+ *                  type: string
+ */
+
+app.put('/user/:id', (req, res) => {
+	let userData = {}
+	const body = req.body
+
+	connection.query(`SELECT * FROM Users WHERE uid=${req.params.id}`, (err, row) => {
+    if(err) res.redirect('/error/' + err.code)
+    else {
+			if(row.length === 0) res.json({msg: "falied"})
+			else{
+				userData = {
+					nickname: row[0]['nickName'], 
+					info: row[0]['info']
+				}
+				
+				Object.keys(body).forEach((e) => {
+					userData[e] = body[e]
+				})
+				
+				connection.query('UPDATE Users SET nickName=?, info=? WHERE uid=?', [userData.nickname, userData.info, req.params.id], (err, row) => {
+					if(err) res.redirect('/error/' + err.code)
+					else res.json({insertId: row.insertId, changedRows: row.changedRows})
+				})
+			}
+		}
+	})
+})
+
+/**
+ * @swagger
+ * /user/password/{user_uid}:
+ *  put:
+ *    summary: "비밀번호 수정"
+ *    description: "요청 경로에 패치 값과 바디 값을 담아 서버에 보낸다."
+ *    tags: [Users]
+ *    parameters:
+ *      - in: path
+ *        name: user_uid
+ *        required: true
+ *        description: 유저 고유 아이디
+ *        schema:
+ *          type: number
+ *    requestBody:
+ *      description: 사용자가 서버로 전달하는 값에 따라 결과 값은 다릅니다. (비밀번호 수정)
  *      required: true
  *      content:
  *        application/x-www-form-urlencoded:
@@ -327,7 +452,7 @@ app.get('/user/:uid', (req, res) => {
  *                  type: string
  */
 
-app.put('/user/:id', (req, res) => {
+app.put('/user/password/:id', (req, res) => {
 	let userData = {}
 	const body = req.body
 
@@ -339,14 +464,13 @@ app.put('/user/:id', (req, res) => {
 				userData = {
 					userid: row[0]['userID'], 
 					userpassword: row[0]['userPassword'],
-					userpicture: row[0]['userPicture']
 				}
 				
 				Object.keys(body).forEach((e) => {
 					userData[e] = body[e]
 				})
 				
-				connection.query('UPDATE Users SET userid=?, userpassword=SHA2(?, 256), userPicture=? WHERE uid=?', [userData.userid, userData.userpassword, userData.userpicture, req.params.id], (err, row) => {
+				connection.query('UPDATE Users SET userid=?, userpassword=SHA2(?, 256) WHERE uid=?', [userData.userid, userData.userpassword, req.params.id], (err, row) => {
 					if(err) res.redirect('/error/' + err.code)
 					else res.json({insertId: row.insertId, changedRows: row.changedRows})
 				})
@@ -664,7 +788,7 @@ app.delete('/topic/:id', (req, res) => {
  * @swagger
  * /topiccomments/insert:
  *  post:
- *    summary: "게시물 작성 기능"
+ *    summary: "댓글 작성 기능"
  *    description: "요청 경로에 바디에 값을 담아 서버에 보낸다."
  *    tags: [TopicComments]
  *    requestBody:
@@ -708,7 +832,7 @@ app.post('/topiccomments/insert', (req, res) => {
  * @swagger
  * /topiccomments/{topic_tid}:
  *  get:
- *    summary: "게시글 댓글 확인"
+ *    summary: "댓글 확인"
  *    description: "요청 경로에 패치 값을 담아 서버에 보낸다."
  *    tags: [TopicComments]
  *    parameters:
@@ -759,9 +883,9 @@ app.get('/topiccomments/:id', (req, res) => {
 
 /**
  * @swagger
- * /topiccomments/{topic_tcid}:
+ * /topiccomments/{topiccomments_tcid}:
  *  delete:
- *    summary: "게시글 삭제"
+ *    summary: "댓글 삭제"
  *    description: "요청 경로에 패치 값을 담아 서버에 보낸다."
  *    tags: [TopicComments]
  *    parameters:
@@ -791,6 +915,195 @@ app.delete('/topiccomments/:id', (req, res) => {
 })
 
 // 게시글 댓글 기능 완료
+
+// 운동 장소 관련
+
+/**
+ * @swagger
+ * /location/insert:
+ *  post:
+ *    summary: "장소 추가 기능"
+ *    description: "요청 경로에 바디에 값을 담아 서버에 보낸다."
+ *    tags: [Location]
+ *    requestBody:
+ *      description: 사용자가 서버로 전달하는 값에 따라 결과 값은 다릅니다. (장소 추가)
+ *      required: true
+ *      content:
+ *        application/x-www-form-urlencoded:
+ *          schema:
+ *            type: object
+ *            properties:
+ *              locationname:
+ *                type: string 
+ *    responses:
+ *      "201":
+ *        description: 사용자가 서버로 전달하는 값에 따라 결과 값은 다릅니다. (장소 추가)
+ *        content:
+ *          application/json:
+ *            schema:
+ *              type: object
+ *              properties:
+ *                insertId:
+ *                  type: number 
+ *                msg:
+ *                  type: string 
+ */
+
+app.post('/Location/insert', (req, res) => {
+	let body = req.body
+
+	connection.query(`INSERT INTO Location (locationName) VALUES (?)`, [body.locationname], (err, row) => {
+		if(err) res.redirect('/error/' + err.code)
+		else res.json({insertId: row.insertId, msg: 'success'})
+	})
+})
+
+/**
+ * @swagger
+ * /location/list:
+ *  get:
+ *    summary: "장소 목록 확인"
+ *    description: "장소 목록 확인"
+ *    tags: [Location]
+ *    responses:
+ *      "200":
+ *        description: 장소 목록 확인
+ *        content:
+ *          application/json:
+ *            schema:
+ *              type: object
+ *              properties:
+ *                lid:
+ *                  type: number
+ *                locationName:
+ *                  type: string
+ */
+
+app.get('/location/list', (req, res) => {
+	let body = req.body
+
+	connection.query(`SELECT * FROM Location`, [body.locationname], (err, rows) => {
+		if(err) res.redirect('/error/' + err.code)
+		else res.json(rows)
+	})
+})
+
+/**
+ * @swagger
+ * /location/{location_lid}:
+ *  delete:
+ *    summary: "장소 삭제"
+ *    description: "요청 경로에 패치 값을 담아 서버에 보낸다."
+ *    tags: [Location]
+ *    parameters:
+ *      - in: path
+ *        name: location_lid
+ *        required: true
+ *        description: 장소 고유 아이디
+ *        schema:
+ *          type: number
+ *    responses:
+ *      "200":
+ *        description: 사용자가 서버로 전달하는 값에 따라 결과 값은 다릅니다. (장소 삭제)
+ *        content:
+ *          application/json:
+ *            schema:
+ *              type: object
+ *              properties:
+ *                affectedRows:
+ *                  type: number
+ */
+
+app.delete('/location/:id', (req, res) => {
+	connection.query('DELETE FROM Location WHERE lid=' + req.params.id, (err, row) => {
+		if(err) res.redirect('/error/' + err.code)
+		else res.json({affectedRows: row.affectedRows})
+	})
+})
+
+// 좋아하는 장소 추가
+
+/**
+ * @swagger
+ * /favoritlocation/insert:
+ *  post:
+ *    summary: "좋아하는 장소 추가 기능"
+ *    description: "요청 경로에 바디에 값을 담아 서버에 보낸다."
+ *    tags: [Favoritlocation]
+ *    requestBody:
+ *      description: 사용자가 서버로 전달하는 값에 따라 결과 값은 다릅니다. (좋아하는 장소 추가)
+ *      required: true
+ *      content:
+ *        application/x-www-form-urlencoded:
+ *          schema:
+ *            type: object
+ *            properties:
+ *              userid:
+ *                type: number 
+ *              locationid:
+ *                type: number 
+ *    responses:
+ *      "201":
+ *        description: 사용자가 서버로 전달하는 값에 따라 결과 값은 다릅니다. (좋아하는 장소 추가)
+ *        content:
+ *          application/json:
+ *            schema:
+ *              type: object
+ *              properties:
+ *                insertId:
+ *                  type: number 
+ *                msg:
+ *                  type: string 
+ */
+
+app.post('/favoritlocation/insert', (req, res) => {
+	let body = req.body
+
+	connection.query(`INSERT INTO favoritLocation (Users_uid, Location_lid) VALUES (?, ?)`, [body.userid, body.locationid], (err, row) => {
+		if(err) res.redirect('/error/' + err.code)
+		else res.json({insertId: row.insertId, msg: 'success'})
+	})
+})
+
+/**
+ * @swagger
+ * /favoritlocation:
+ *  delete:
+ *    summary: "좋아하는 장소 삭제"
+ *    description: "요청 경로에 패치 값을 담아 서버에 보낸다."
+ *    tags: [Favoritlocation]
+ *    parameters:
+ *      - in: query
+ *        name: uid
+ *        required: true
+ *        description: 유저 아이디
+ *        schema:
+ *          type: number
+ *      - in: query
+ *        name: lid
+ *        required: true
+ *        description: 로케이션 아이디
+ *        schema:
+ *          type: number
+ *    responses:
+ *      "200":
+ *        description: 사용자가 서버로 전달하는 값에 따라 결과 값은 다릅니다. (좋아하는 장소 삭제)
+ *        content:
+ *          application/json:
+ *            schema:
+ *              type: object
+ *              properties:
+ *                affectedRows:
+ *                  type: number
+ */
+
+app.delete('/favoritlocation', (req, res) => {
+	let sql = `DELETE FROM favoritLocation WHERE Users_uid=? AND Location_lid=?`
+	connection.query(sql, [req.query.uid, req.query.lid] , (err, row) => {
+		if(err) res.redirect('/error/' + err.code)
+		else res.json({affectedRows: row.affectedRows})
+	})
+})
 
 // 데이터베이스 외래키 관계 확인
 

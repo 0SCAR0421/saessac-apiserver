@@ -6,6 +6,33 @@ const multer = require('multer')
 const fs = require('fs')
 const static = require('serve-static')
 const { swaggerUi, specs } = require('./swaggerDoc')
+const jwt = require('jsonwebtoken');
+require("dotenv").config()
+
+const secretKey = process.env.SECRET_KEY;
+const algorithm = process.env.JWT_ALG;
+const expiresIn = process.env.JWT_EXP;
+const issuer = process.env.JWT_ISSUER;
+
+const option = { algorithm, expiresIn, issuer };
+
+const makeToken = (payload) => {
+  return jwt.sign(payload, secretKey, {expiresIn: 60});
+}
+
+const decodePayload = (token) => {
+  return jwt.verify(token, secretKey);
+}
+
+const auth = (req, res, next) => {
+	try{
+		const uid = decodePayload(req.params.token)
+		req.data = {...req.data, uid: uid.uid}
+	} catch(e) {
+		req.data = {...req.data, msg: "로그인을 다시해주세요"}
+	}
+	next()
+}
 
 const port = process.env.PORT || 80
 const app = express()
@@ -52,7 +79,8 @@ app.use(express.json())
 app.use(cors())
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(specs))
 
-app.get('/', (req, res) => {
+app.get('/:token', auth ,(req, res) => {
+	console.log(req.data)
 	res.send('Hello! this is saessac\'s api server!')
 })
 
@@ -134,7 +162,7 @@ app.get('/user/checkid', (req, res) => {
 
 app.post('/user/insert', (req, res) => {
 	let body = req.body
-	console.log('user insert')
+	
 	connection.query(`SELECT COUNT(userID) FROM Users WHERE userID=?`,[body.userid], (err, row) => {
 		if(err) res.redirect('/error/' + err.code)
 		else{
@@ -191,6 +219,7 @@ app.post('/user/picture/', (req, res) => {
 
 // 프로필사진 업로드
 app.post('/user/picture/:id', upload.single('profilepicture'), (req, res, next) => {
+	console.log('hello')
 	if(req.file === undefined) {
 		res.json({"msg" : "failed! picture not found"})
 	} else {
@@ -328,15 +357,17 @@ app.get('/user/:uid', (req, res) => {
 
 app.post('/user/login', (req, res) => {
 	let body = req.body
-	console.log(body)
+	
 	let query = `SELECT uid FROM Users WHERE userid='${body.userid}' AND userpassword=SHA2('${body.userpassword}', 256)`
 	// let query = `SELECT uid FROM Users WHERE userID='${body.userid}' AND userPassword=SHA2('${body.userpassword}', 256)`;
 	connection.query(query, (err, row) => {
-		console.log(row)
     if(err) res.redirect('/error/' + err.code)
     else {
 			if(row.length === 0) res.json({msg: 'failed'})
-			else res.json({uid: row[0].uid, msg: 'success'})
+			else {
+				const token = makeToken({"uid": row[0].uid, "userid": row[0].userID, "nickname": row[0].nickName}, )
+				res.json({msg: 'success', token})
+			}
     }
 	})
 });
@@ -653,7 +684,7 @@ app.get('/topic/list', (req, res) => {
  */
 
 app.get('/topic/:id', (req, res) => {
-	let sql = `SELECT tid, topicTitle, topicContents, uid, userID, Topic.created_at, Topic.updated_at, userPicture, lid, locationName FROM Topic LEFT JOIN Users ON Topic.Users_uid = Users.uid LEFT JOIN Location ON Topic.location_lid = Location.lid WHERE tid=${req.params.id}`
+	let sql = `SELECT tid, topicTitle, topicContents, uid, userID, Topic.created_at, Topic.updated_at, userPicture, lid, locationName, topicLike FROM Topic LEFT JOIN Users ON Topic.Users_uid = Users.uid LEFT JOIN Location ON Topic.location_lid = Location.lid WHERE tid=${req.params.id}`
 	connection.query(sql, (err, rows) => {
 		if(err) res.redirect('/error/' + err.code)
 		else res.json(rows)

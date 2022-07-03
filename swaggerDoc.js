@@ -5,7 +5,7 @@ const options = {
   swaggerDefinition: {
     openapi: "3.0.0",
     info: {
-      version: "1.1.0",
+      version: "1.2.0",
       title: "saessac api server",
       description:
         "saessac api server",

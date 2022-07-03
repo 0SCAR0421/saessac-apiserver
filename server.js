@@ -262,12 +262,16 @@ app.post('/user/picture/:id', upload.single('profilepicture'), (req, res, next) 
  *                  type: number
  *                userID:
  *                  type: string
+ *                nickName:
+ *                  type: string 
+ *                info:
+ *                  type: string
  *                userPicture:
  *                  type: string 
  */
 
 app.get('/user/list', (req, res) => {
-	connection.query('SELECT uid, userID, userPicture FROM Users', (err, rows) => {
+	connection.query('SELECT uid, userID, nickName, info, userPicture FROM Users', (err, rows) => {
 		if(err) res.redirect('/error/' + err.code)
 		// else res.send(JSON.stringify(...rows))
 		else {
@@ -568,6 +572,8 @@ app.delete('/user/:id', (req, res) => {
  *                type: number 
  *              location_lid:
  *                type: number 
+ *              type:
+ *                type: string 
  *    responses:
  *      "201":
  *        description: 사용자가 서버로 전달하는 값에 따라 결과 값은 다릅니다. (게시글 작성)
@@ -585,7 +591,7 @@ app.delete('/user/:id', (req, res) => {
 app.post('/topic/insert', (req, res) => {
 	let body = req.body
 
-	connection.query(`INSERT INTO Topic (topicTitle, topicContents, Users_uid, Location_lid) VALUES (?, ?, ?, ?)`, [body.topictitle, body.topiccontents, body.users_uid, body.location_lid], (err, row) => {
+	connection.query(`INSERT INTO Topic (topicTitle, topicContents, Users_uid, Location_lid, type) VALUES (?, ?, ?, ?, ?)`, [body.topictitle, body.topiccontents, body.users_uid, body.location_lid, body.type], (err, row) => {
 		if(err) res.redirect('/error/' + err.code)
 		else res.json({insertId: row.insertId, msg: 'success'})
 	})
@@ -598,6 +604,15 @@ app.post('/topic/insert', (req, res) => {
  *    summary: "게시글 목록 확인"
  *    description: "게시글 목록 확인"
  *    tags: [Topic]
+ *    parameters:
+ *      - in: query
+ *        name: type
+ *        required: false
+ *        description: 게시글 타입
+ *      - in: query
+ *        name: recruit
+ *        required: false
+ *        description: 모집여부
  *    responses:
  *      "200":
  *        description: "게시글 목록 확인"
@@ -629,10 +644,12 @@ app.post('/topic/insert', (req, res) => {
  */
 
 app.get('/topic/list', (req, res) => {
-	let sort = req.query.sort || 'ASC'
-	let offset = req.query.offset || 0
-	let sql = `SELECT tid, topicTitle, topicContents, uid, userID, Topic.created_at, Topic.updated_at, userPicture, lid, locationName FROM Topic LEFT JOIN Users ON Topic.Users_uid = Users.uid LEFT JOIN Location ON Topic.location_lid = Location.lid ORDER BY Topic.tid ${sort} LIMIT 10 OFFSET ${offset}`
+	// let sort = req.query.sort || 'ASC'
+	// let offset = req.query.offset || 0
+	let type = req.query.type
+	let recruit = req.query.recruit
 
+	let sql = `SELECT tid, topicTitle, topicContents, uid, userID, Topic.created_at, Topic.updated_at, userPicture, lid, locationName FROM Topic LEFT JOIN Users ON Topic.Users_uid = Users.uid LEFT JOIN Location ON Topic.location_lid = Location.lid ${type ? "WHERE type=\"" + type + "\"" : ""} ${recruit ? "AND recruit=\"" + recruit + "\"" : ""}`
 	connection.query(sql, (err, rows) => {
 		if(err) res.redirect('/error/' + err.code)
 		else res.json(rows)

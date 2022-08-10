@@ -1,13 +1,33 @@
 const express = require('express')
 const mysql = require('mysql')
-const dbconfig = require('./config/database.js')
+const dbconfig = require('../config/database.js')
 const cors = require('cors')
-const multer = require('multer')
+const fileUpload = require('express-fileupload');
 const fs = require('fs')
 const static = require('serve-static')
-const { swaggerUi, specs } = require('./swaggerDoc')
+const { swaggerUi, specs } = require('../swaggerDoc')
 const jwt = require('jsonwebtoken');
-require("dotenv").config()
+require("dotenv").config({path: "../.env"})
+const path = require('path');
+const HTTPS = require('https');
+
+const randomNickname = () =>{
+	const adjective = [
+		'기쁜', '차분한',
+		'추운', '시원한',
+		'귀여운', '따분한',
+		'공정한', '친절한',
+		'예리한', '건강한'
+	]
+	const noun = [
+		'쿼카', '돌고래',
+		'고양이', '강아지',
+		'다람쥐', '여우',
+		'사슴', '반달곰',
+		'나무늘보', '고라니'
+	]
+	return `${adjective[Math.floor(Math.random() * 10)]} ${noun[Math.floor(Math.random() * 10)]}`
+}
 
 const secretKey = process.env.SECRET_KEY;
 const algorithm = process.env.JWT_ALG;
@@ -17,7 +37,7 @@ const issuer = process.env.JWT_ISSUER;
 const option = { algorithm, expiresIn, issuer };
 
 const makeToken = (payload) => {
-  return jwt.sign(payload, secretKey, {expiresIn: 60});
+  return jwt.sign(payload, secretKey, {expiresIn: 6000});
 }
 
 const decodePayload = (token) => {
@@ -26,12 +46,13 @@ const decodePayload = (token) => {
 
 const auth = (req, res, next) => {
 	try{
-		const uid = decodePayload(req.params.token)
-		req.data = {...req.data, uid: uid.uid}
+		const data = decodePayload(req.headers.authorization)
+		req.data = {...req.data, uid: data.uid, msg: true}
+		next()
 	} catch(e) {
-		req.data = {...req.data, msg: "로그인을 다시해주세요"}
+		req.data = {...req.data, msg: false}
+		res.json(req.data)
 	}
-	next()
 }
 
 const port = process.env.PORT || 80
@@ -61,27 +82,18 @@ function handleDisconnect() {
 
 handleDisconnect()
 
-const storage = multer.diskStorage({
-	destination: function (req, file, callback) {
-		callback(null, __dirname + '/src/profilepicture/') // 파일 업로드 경로
-	},
-	filename: function (req, file, callback) {
-		callback(null, file.fieldname + Date.now() + ".png") //파일 이름 설정
-	}
-})
-const upload = multer({
-	storage
-})
-
-app.use(static(__dirname))
+app.use(static(__dirname + "/../"))
 app.use(express.urlencoded({ extended: true }))
 app.use(express.json())
 app.use(cors())
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(specs))
 
-app.get('/:token', auth ,(req, res) => {
-	console.log(req.data)
-	res.send('Hello! this is saessac\'s api server!')
+app.get('/', (req, res) => {
+	res.setHeader('hello', 'hello').send('Hello! this is saessac\'s api server!')
+})
+
+app.get('/nickname', (req, res) => {
+	res.send(randomNickname())
 })
 
 app.get('/error/:msg', (req, res) => {
@@ -162,12 +174,12 @@ app.get('/user/checkid', (req, res) => {
 
 app.post('/user/insert', (req, res) => {
 	let body = req.body
-	
+
 	connection.query(`SELECT COUNT(userID) FROM Users WHERE userID=?`,[body.userid], (err, row) => {
 		if(err) res.redirect('/error/' + err.code)
 		else{
 			if(row[0]["COUNT(userID)"] === 0){
-				connection.query(`INSERT INTO Users (userID, userPassword) VALUES (?, SHA2(?, 256))`, [body.userid, body.userpassword], (err, row) => {
+				connection.query(`INSERT INTO Users (userID, userPassword, nickName) VALUES (?, SHA2(?, 256), ?)`, [body.userid, body.userpassword, randomNickname()], (err, row) => {
 					if(err) res.redirect('/error/' + err.code)
 					else res.json({insertId: row.insertId, msg: 'success'})
 				})
@@ -178,22 +190,26 @@ app.post('/user/insert', (req, res) => {
 	})
 })
 
-app.post('/user/picture/', (req, res) => {
-	res.json({"msg" : "failed! please check endpoint"})
+app.get('/user/checklogin', auth, (req, res) => {
+	let query = `SELECT uid, userid, nickname, userPicture FROM Users WHERE uid=${req.data.uid}`
+	connection.query(query, (err, rows) => {
+    if(err) res.redirect('/error/' + err.code)
+    else {
+			if(rows.length === 0) res.json({msg: false})
+			else {
+				res.json({msg: true, userid: rows[0].userid, nickname: rows[0].nickname, userPicture: rows[0].userPicture})
+			}
+    }
+	})
 })
 
 /**
  * @swagger
- * /user/picture/{user_uid}:
+ * /user/picture:
  *  post:
  *    summary: "프로필 사진 수정"
  *    description: "요청 경로에 값을 담아 서버에 보낸다. 본 문서상에서는 실행 불가능"
  *    tags: [Users]
- *    parameters:
- *      - in: path
- *        name: user_uid
- *        required: true
- *        description: 유저 고유 아이디 
  *    requestBody:
  *      description: 사용자가 서버로 전달하는 값에 따라 결과 값은 다릅니다. (프로필 사진 업로드)
  *      required: true
@@ -218,29 +234,72 @@ app.post('/user/picture/', (req, res) => {
  */
 
 // 프로필사진 업로드
-app.post('/user/picture/:id', upload.single('profilepicture'), (req, res, next) => {
-	console.log('hello')
-	if(req.file === undefined) {
-		res.json({"msg" : "failed! picture not found"})
-	} else {
-		const { fieldname, originalname, encoding, mimetype, destination, filename, path, size } = req.file
-		connection.query('SELECT * FROM Users WHERE uid=' + req.params.id, (err, row) => {
+app.post('/user/picture', auth, fileUpload(), (req, res, next) => {
+	if(req.files === null) res.json({msg: false})
+	else{
+		const name = (Object.keys(req.files)[0])
+		const file = req.files[name]
+		file.name = "profilepicture" + Date.now() + ".png"
+
+		connection.query('SELECT * FROM Users WHERE uid=' + req.data.uid, (err, row) => {
 			if(err) res.redirect('/error/' + err.code)
-			else {
+			else{
 				if(row.length){
-					if(row[0].userPicture) fs.unlink(__dirname + row[0].userPicture, () => {console.log('prevPicture delete')})
-					connection.query('UPDATE Users SET userPicture=? WHERE uid=?', [path.slice(30), req.params.id], (err, row) => {
+					if(row[0].userPicture && row[0].userPicture !== "src/profilepicture/defaultProfile.png") fs.unlink(`${__dirname}/../${row[0].userPicture}`, () => {console.log(`${__dirname}/../${row[0].userPicture}`)})
+					connection.query('UPDATE Users SET userPicture=? WHERE uid=?', [`src/profilepicture/${file.name}`, req.data.uid], (err, row) => {
 						if(err) res.redirect('/error/' + err.code)
-						else res.json({"msg" : `success! filename is ${filename}`})
+						else{
+							file.mv(`${__dirname}/../src/profilepicture/${file.name}`, err => {
+								if(err) res.json({msg: false})
+								else {
+									res.json({msg: true})
+								}
+							})
+						}
 					})
 				} else {
-					fs.unlink(path, () => {
-						res.json({"msg" : "failed! user not found"})
-					})
+					res.json({msg: false})
 				}
 			}
 		})
 	}
+})
+
+/**
+ * @swagger
+ * /user/picture:
+ *  put:
+ *    summary: "프로필 사진 제거"
+ *    description: "프로필 사진 제거"
+ *    tags: [Users]
+ *    responses:
+ *      "201":
+ *        description: 프로필 사진 제거
+ *        content:
+ *          application/json:
+ *            schema:
+ *              type: object
+ *              properties:
+ *                msg:
+ *                  type: boolean
+ */
+
+app.put('/user/picture', auth, (req, res) => {
+	connection.query('SELECT userPicture FROM Users WHERE uid=?', [req.data.uid], (err, row) => {
+		if(row[0].userPicture !== 'src/profilepicture/defaultProfile.png'){
+			fs.unlink(`${__dirname}/../${row[0].userPicture}`, () => {console.log(`${__dirname}/../${row[0].userPicture}`)})
+		}
+		else {
+			console.log('default img')
+		}
+	})
+
+	connection.query('UPDATE Users SET userPicture=? WHERE uid=?', [`src/profilepicture/defaultProfile.png`, req.data.uid], (err, row) => {
+		if(err) res.redirect('/error/' + err.code)
+		else{
+			res.json({msg: true})
+		}
+	})
 })
 
 /**
@@ -282,18 +341,11 @@ app.get('/user/list', (req, res) => {
 
 /**
  * @swagger
- * /user/{user_uid}:
+ * /user:
  *  get:
  *    summary: "회원 정보 확인"
  *    description: "요청 경로에 패치 값을 담아 서버에 보낸다."
  *    tags: [Users]
- *    parameters:
- *      - in: path
- *        name: user_uid
- *        required: true
- *        description: 유저 고유 아이디
- *        schema:
- *          type: number
  *    responses:
  *      "200":
  *        description: 사용자가 서버로 전달하는 값에 따라 결과 값은 다릅니다. (유저 조회)
@@ -316,15 +368,34 @@ app.get('/user/list', (req, res) => {
  *                  type: string
  */
 
-app.get('/user/:uid', (req, res) => {
-	let query = `SELECT uid, userID, userPicture, nickName, info, group_concat(locationName) FROM favoritLocation AS F INNER JOIN Users AS U ON F.Users_uid = U.uid INNER JOIN Location AS L ON F.Location_lid = L.lid WHERE U.uid = ${req.params.uid}`;
+app.get('/user', auth, (req, res) => {
+	let query = `SELECT userID, userPicture, nickName, info, group_concat(Location_lid), group_concat(locationName) FROM favoritLocation AS F INNER JOIN Users AS U ON F.Users_uid = U.uid INNER JOIN Location AS L ON F.Location_lid = L.lid WHERE U.uid = ${req.data.uid}`;
 	connection.query(query, (err, row) => {
-    if(err) res.redirect('/error/' + err.code)
-    else {
-			res.json(row)
-    }
+		if(err) res.redirect('/error/' + err.code)
+		else {
+			let locationLid = null
+			let locationName = null
+			let favoritLocation = []
+			if(row[0]['group_concat(Location_lid)']){
+				locationLid = row[0]['group_concat(Location_lid)'].split(',')
+				locationName = row[0]['group_concat(locationName)'].split(',')
+				favoritLocation = locationLid.map((e, i) => {
+					return [e, locationName[i]]
+				})
+			}
+			res.json({data: {userID: row[0].userID, userPicture: row[0].userPicture, nickName: row[0].nickName, info: row[0].info, favoritLocation}, msg: true})
+		}
 	})
 });
+
+app.get('/user/topic', auth, (req, res) => {
+	let sql = `SELECT tid, topicTitle, topicContents, userID, Topic.created_at, Topic.updated_at, userPicture, lid, locationName, topicLike, recruit, type FROM Topic LEFT JOIN Users ON Topic.Users_uid = Users.uid LEFT JOIN Location ON Topic.location_lid = Location.lid WHERE uid=${req.data.uid}`
+	connection.query(sql, (err, rows) => {
+		if(err) res.redirect('/error/' + err.code)
+		else res.json(rows)
+	})
+})
+
 
 /**
  * @swagger
@@ -361,16 +432,15 @@ app.get('/user/:uid', (req, res) => {
 
 app.post('/user/login', (req, res) => {
 	let body = req.body
-	
-	let query = `SELECT uid FROM Users WHERE userid='${body.userid}' AND userpassword=SHA2('${body.userpassword}', 256)`
+	let query = `SELECT uid, userid, nickname, userPicture FROM Users WHERE userid='${body.userid}' AND userpassword=SHA2('${body.userpassword}', 256)`
 	// let query = `SELECT uid FROM Users WHERE userID='${body.userid}' AND userPassword=SHA2('${body.userpassword}', 256)`;
-	connection.query(query, (err, row) => {
+	connection.query(query, (err, rows) => {
     if(err) res.redirect('/error/' + err.code)
     else {
-			if(row.length === 0) res.json({msg: 'failed'})
+			if(rows.length === 0) res.json({msg: false})
 			else {
-				const token = makeToken({"uid": row[0].uid, "userid": row[0].userID, "nickname": row[0].nickName}, )
-				res.json({msg: 'success', token})
+				const token = makeToken({"uid": rows[0].uid, "userid": rows[0].userid, "nickname": rows[0].nickname}, )
+				res.header('token', token).json({msg: true, token, userid: rows[0].userid, nickname: rows[0].nickname, userPicture: rows[0].userPicture})
 			}
     }
 	})
@@ -418,11 +488,11 @@ app.post('/user/login', (req, res) => {
  *                  type: string
  */
 
-app.put('/user/:id', (req, res) => {
+app.put('/user', auth, (req, res) => {
 	let userData = {}
 	const body = req.body
 
-	connection.query(`SELECT * FROM Users WHERE uid=${req.params.id}`, (err, row) => {
+	connection.query(`SELECT * FROM Users WHERE uid=${req.data.uid}`, (err, row) => {
     if(err) res.redirect('/error/' + err.code)
     else {
 			if(row.length === 0) res.json({msg: "falied"})
@@ -436,7 +506,7 @@ app.put('/user/:id', (req, res) => {
 					userData[e] = body[e]
 				})
 				
-				connection.query('UPDATE Users SET nickName=?, info=? WHERE uid=?', [userData.nickname, userData.info, req.params.id], (err, row) => {
+				connection.query('UPDATE Users SET nickName=?, info=? WHERE uid=?', [userData.nickname, userData.info, req.data.uid], (err, row) => {
 					if(err) res.redirect('/error/' + err.code)
 					else res.json({insertId: row.insertId, changedRows: row.changedRows})
 				})
@@ -487,14 +557,14 @@ app.put('/user/:id', (req, res) => {
  *                  type: string
  */
 
-app.put('/user/password/:id', (req, res) => {
+app.put('/user/password', auth, (req, res) => {
 	let userData = {}
 	const body = req.body
 
-	connection.query(`SELECT * FROM Users WHERE uid=${req.params.id} AND userpassword=SHA2('${body.currentuserpassword}', 256)`, (err, row) => {
+	connection.query(`SELECT * FROM Users WHERE uid=${req.data.uid} AND userpassword=SHA2('${body.currentuserpassword}', 256)`, (err, row) => {
     if(err) res.redirect('/error/' + err.code)
     else {
-			if(row.length === 0) res.json({msg: "falied"})
+			if(row.length === 0) res.json({msg: "failed"})
 			else{
 				userData = {
 					userid: row[0]['userID'], 
@@ -505,7 +575,7 @@ app.put('/user/password/:id', (req, res) => {
 					userData[e] = body[e]
 				})
 				
-				connection.query('UPDATE Users SET userid=?, userpassword=SHA2(?, 256) WHERE uid=?', [userData.userid, userData.userpassword, req.params.id], (err, row) => {
+				connection.query('UPDATE Users SET userid=?, userpassword=SHA2(?, 256) WHERE uid=?', [userData.userid, userData.userpassword, req.data.uid], (err, row) => {
 					if(err) res.redirect('/error/' + err.code)
 					else res.json({insertId: row.insertId, changedRows: row.changedRows})
 				})
@@ -540,8 +610,8 @@ app.put('/user/password/:id', (req, res) => {
  *                  type: number
  */
 
-app.delete('/user/:id', (req, res) => {
-	connection.query('DELETE FROM Users WHERE uid=' + req.params.id, (err, row) => {
+app.delete('/user', auth, (req, res) => {
+	connection.query('DELETE FROM Users WHERE uid=' + req.data.uid, (err, row) => {
 		if(err) res.redirect('/error/' + err.code)
 		else res.json({affectedRows: row.affectedRows})
 	})
@@ -588,12 +658,14 @@ app.delete('/user/:id', (req, res) => {
  *                  type: string 
  */
 
-app.post('/topic/insert', (req, res) => {
+app.post('/topic/insert', auth, (req, res) => {
 	let body = req.body
 
-	connection.query(`INSERT INTO Topic (topicTitle, topicContents, Users_uid, Location_lid, type) VALUES (?, ?, ?, ?, ?)`, [body.topictitle, body.topiccontents, body.users_uid, body.location_lid, body.type], (err, row) => {
+	connection.query(`INSERT INTO Topic (topicTitle, topicContents, Users_uid, Location_lid, type) VALUES (?, ?, ?, ?, ?)`, [body.topictitle, body.topiccontents, req.data.uid, body.location_lid, body.type], (err, row) => {
 		if(err) res.redirect('/error/' + err.code)
-		else res.json({insertId: row.insertId, msg: 'success'})
+		else {
+			res.json({insertId: row.insertId, msg: 'success'})
+		}
 	})
 })
 
@@ -608,11 +680,11 @@ app.post('/topic/insert', (req, res) => {
  *      - in: query
  *        name: type
  *        required: false
- *        description: 게시글 타입
+ *        description: location friend
  *      - in: query
  *        name: recruit
  *        required: false
- *        description: 모집여부
+ *        description: recruiting recruited
  *    responses:
  *      "200":
  *        description: "게시글 목록 확인"
@@ -644,15 +716,64 @@ app.post('/topic/insert', (req, res) => {
  */
 
 app.get('/topic/list', (req, res) => {
-	// let sort = req.query.sort || 'ASC'
-	// let offset = req.query.offset || 0
+	let sort = req.query.sort
+	let offset = req.query.offset
+	let limit = req.query.limit
 	let type = req.query.type
 	let recruit = req.query.recruit
 
-	let sql = `SELECT tid, topicTitle, topicContents, uid, userID, Topic.created_at, Topic.updated_at, userPicture, lid, locationName FROM Topic LEFT JOIN Users ON Topic.Users_uid = Users.uid LEFT JOIN Location ON Topic.location_lid = Location.lid ${type ? "WHERE type=\"" + type + "\"" : ""} ${recruit ? "AND recruit=\"" + recruit + "\"" : ""}`
+	let whereBy =  `${type ? "WHERE type=\"" + type + "\"" : ""} ${recruit ? "AND recruit=\"" + recruit + "\"" : ""}`
+	let orderBy = `ORDER BY tid`
+	if(sort) orderBy = orderBy + " " + sort
+	if(limit){
+		if(offset){
+			orderBy = orderBy + " LIMIT " + limit + " OFFSET " + offset
+		}
+		else{
+			orderBy = orderBy + " LIMIT " + limit
+		}
+	}
+
+	let sql = `SELECT tid, topicTitle, topicContents, userID, Topic.created_at, Topic.updated_at, userPicture, lid, locationName, type, recruit, nickName FROM Topic LEFT JOIN Users ON Topic.Users_uid = Users.uid LEFT JOIN Location ON Topic.location_lid = Location.lid ${whereBy} ${orderBy}`
 	connection.query(sql, (err, rows) => {
 		if(err) res.redirect('/error/' + err.code)
 		else res.json(rows)
+	})
+})
+
+/**
+ * @swagger
+ * /topic/list/count:
+ *  get:
+ *    summary: "게시글 갯수 확인"
+ *    description: "게시글 갯수 확인"
+ *    tags: [Topic]
+ *    parameters:
+ *      - in: query
+ *        name: type
+ *        required: false
+ *        description: location friend
+ *    responses:
+ *      "200":
+ *        description: "게시글 갯수 확인"
+ *        content:
+ *          application/json:
+ *            schema:
+ *              type: object
+ *              properties:
+ *                count:
+ *                  type: number
+ */
+
+app.get('/topic/list/count', (req, res) => {
+	let type = req.query.type
+	let recruit = req.query.recruit
+	let whereBy =  `${type ? "WHERE type=\"" + type + "\"" : ""} ${recruit ? "AND recruit=\"" + recruit + "\"" : ""}`
+	let sql = `SELECT count(*) FROM Topic LEFT JOIN Users ON Topic.Users_uid = Users.uid LEFT JOIN Location ON Topic.location_lid = Location.lid ${whereBy}`
+
+	connection.query(sql, (err, row) => {
+		if(err) res.redirect('/error/' + err.code)
+		else res.json({count: row[0]['count(*)']})
 	})
 })
 
@@ -698,10 +819,14 @@ app.get('/topic/list', (req, res) => {
  *                  type: number 
  *                locationName:
  *                  type: string 
+ *                recruit:
+ *                  type: string 
+ *                type:
+ *                  type: string 
  */
 
 app.get('/topic/:id', (req, res) => {
-	let sql = `SELECT tid, topicTitle, topicContents, uid, userID, Topic.created_at, Topic.updated_at, userPicture, lid, locationName, topicLike FROM Topic LEFT JOIN Users ON Topic.Users_uid = Users.uid LEFT JOIN Location ON Topic.location_lid = Location.lid WHERE tid=${req.params.id}`
+	let sql = `SELECT tid, topicTitle, topicContents, userID, Topic.created_at, Topic.updated_at, userPicture, lid, locationName, topicLike, recruit, nickName, type FROM Topic LEFT JOIN Users ON Topic.Users_uid = Users.uid LEFT JOIN Location ON Topic.location_lid = Location.lid WHERE tid=${req.params.id}`
 	connection.query(sql, (err, rows) => {
 		if(err) res.redirect('/error/' + err.code)
 		else res.json(rows)
@@ -736,9 +861,12 @@ app.get('/topic/:id', (req, res) => {
  *              topiccontents:
  *                type: string
  *                description: "게시글 내용"
- *              uid:
+ *              recruit:
+ *                type: string
+ *                description: "모집 여부"
+ *              location_lid:
  *                type: number
- *                description: "작성자 고유 아이디"
+ *                description: "장소 고유 아이디"
  *    responses:
  *      "201":
  *        description: 사용자가 서버로 전달하는 값에 따라 결과 값은 다릅니다. (게시글 수정)
@@ -753,25 +881,28 @@ app.get('/topic/:id', (req, res) => {
  *                  type: string
  */
 
-app.put('/topic/:id', (req, res) => {
+app.put('/topic/:id', auth, (req, res) => {
 	let topicData = {}
 	const body = req.body
-
-	let sql = `SELECT topicTitle, topicContents, Users_uid FROM Topic WHERE tid=${req.params.id}`
+	
+	let sql = `SELECT topicTitle, topicContents, Users_uid, recruit, location_lid FROM Topic WHERE tid=${req.params.id}`
 	connection.query(sql, (err, row) => {
     if(err) res.redirect('/error/' + err.code)
     else {
-			if(Number(body.uid) === row[0]["Users_uid"]){
+			
+			if(Number(req.data.uid) === row[0]["Users_uid"]){
 				topicData = {
 					topictitle: row[0]['topicTitle'],
-					topiccontents: row[0]['topicContents']
-				}
+					topiccontents: row[0]['topicContents'],
+					recruit: row[0]['recruit'],
+					location_lid: row[0]['location_lid']
+				}  
 				
 				Object.keys(body).forEach((e) => {
 					topicData[e] = body[e]
 				})
-				
-				connection.query('UPDATE Topic SET topicTitle=?, topicContents=? WHERE tid=?', [topicData.topictitle, topicData.topiccontents, req.params.id], (err, row) => {
+
+				connection.query('UPDATE Topic SET topicTitle=?, topicContents=?, recruit=?, location_lid=? WHERE tid=?', [topicData.topictitle, topicData.topiccontents, topicData.recruit, topicData.location_lid, req.params.id], (err, row) => {
 					if(err) res.redirect('/error/' + err.code)
 					else res.json({insertId: row.insertId, changedRows: row.changedRows})
 				})
@@ -810,18 +941,28 @@ app.put('/topic/:id', (req, res) => {
  *                  type: object
  */
 
-app.delete('/topic/:id', (req, res) => {
+app.delete('/topic/:id', auth, (req, res) => {
 	let msg = {}
-	connection.query('DELETE FROM topicComents WHERE Topic_tid=' + req.params.id, (err, row) => {
-		if(err) res.redirect('/error/' + err.code)
-		else msg = {comments: {affectedRows: row.affectedRows}}
-	})
-
-	connection.query('DELETE FROM Topic WHERE tid=' + req.params.id, (err, row) => {
+	let sql = `SELECT topicTitle, topicContents, Users_uid, recruit, location_lid FROM Topic WHERE tid=${req.params.id}`
+	connection.query(sql, (err, row) => {
 		if(err) res.redirect('/error/' + err.code)
 		else {
-			msg = {...msg, topic: {affectedRows: row.affectedRows}}
-			res.json(msg)
+			if(Number(req.data.uid) !== row[0]["Users_uid"]){
+				res.json({msg: 'err'})
+			} else {
+				connection.query('DELETE FROM topicComents WHERE Topic_tid=' + req.params.id, (err, row) => {
+					if(err) res.redirect('/error/' + err.code)
+					else msg = {comments: {affectedRows: row.affectedRows}}
+				})
+			
+				connection.query('DELETE FROM Topic WHERE tid=' + req.params.id, (err, row) => {
+					if(err) res.redirect('/error/' + err.code)
+					else {
+						msg = {...msg, topic: {affectedRows: row.affectedRows}}
+						res.json(msg)
+					}
+				})
+			}
 		}
 	})
 });
@@ -867,10 +1008,10 @@ app.delete('/topic/:id', (req, res) => {
  *                  type: string 
  */
 
-app.post('/topiccomments/insert', (req, res) => {
+app.post('/topiccomments/insert', auth, (req, res) => {
 	let body = req.body
 
-	connection.query(`INSERT INTO topicComents (topicComent, Topic_tid, Users_uid) VALUES (?, ?, ?)`, [body.topiccomment, body.topic_tid, body.users_uid], (err, row) => {
+	connection.query(`INSERT INTO topicComents (topicComent, Topic_tid, Users_uid) VALUES (?, ?, ?)`, [body.topiccomment, body.topic_tid, req.data.uid], (err, row) => {
 		if(err) res.redirect('/error/' + err.code)
 		else res.json({insertId: row.insertId, msg: 'success'})
 	})
@@ -918,14 +1059,36 @@ app.post('/topiccomments/insert', (req, res) => {
  *                  type: string 
  */
 
+//  /topiccomments/{tid}/?sort="ASC OR DESC"&offset=1
+
 app.get('/topiccomments/:id', (req, res) => {
-	let sort = req.query.sort || 'ASC'
-	let offset = req.query.offset || 0
-	let sql = `SELECT tcid, topicComent, topicComents.created_at, topicComents.updated_at, tid, Location_lid, uid, userID, userPicture FROM topicComents LEFT JOIN Topic ON topicComents.Topic_tid = Topic.tid LEFT JOIN Users ON topicComents.Users_uid = Users.uid WHERE Topic_tid=${req.params.id} ORDER BY topicComents.tcid ${sort} LIMIT 10 OFFSET ${offset}`
+	let sort = req.query.sort
+	let offset = req.query.offset
+	let limit = req.query.limit
+	let orderBy = `ORDER BY topicComents.tcid`
+
+	if(sort) orderBy = orderBy + " " + sort
+	if(limit){
+		if(offset){
+			orderBy = orderBy + " LIMIT " + limit + " OFFSET " + offset
+		}
+		else{
+			orderBy = orderBy + " LIMIT " + limit
+		}
+	}
+	let sql = `SELECT tcid, topicComent, topicComents.created_at, topicComents.updated_at, tid, Location_lid, userID, userPicture, nickname FROM topicComents LEFT JOIN Topic ON topicComents.Topic_tid = Topic.tid LEFT JOIN Users ON topicComents.Users_uid = Users.uid WHERE Topic_tid=${req.params.id} ${orderBy}`
 
 	connection.query(sql, (err, rows) => {
 		if(err) res.redirect('/error/' + err.code)
 		else res.json(rows)
+	})
+})
+
+app.get('/topiccomments/count/:id', (req, res) => {
+	let sql = `SELECT count(*) FROM topicComents LEFT JOIN Topic ON topicComents.Topic_tid = Topic.tid LEFT JOIN Users ON topicComents.Users_uid = Users.uid WHERE Topic_tid=${req.params.id}`
+	connection.query(sql, (err, row) => {
+		if(err) res.redirect('/error/' + err.code)
+		else res.json({count: row[0]['count(*)']})
 	})
 })
 
@@ -999,7 +1162,6 @@ app.delete('/topiccomments/:id', (req, res) => {
 
 app.post('/Location/insert', (req, res) => {
 	let body = req.body
-
 	connection.query(`INSERT INTO Location (locationName) VALUES (?)`, [body.locationname], (err, row) => {
 		if(err) res.redirect('/error/' + err.code)
 		else res.json({insertId: row.insertId, msg: 'success'})
@@ -1104,10 +1266,10 @@ app.delete('/location/:id', (req, res) => {
  *                  type: string 
  */
 
-app.post('/favoritlocation/insert', (req, res) => {
+app.post('/favoritlocation/insert', auth, (req, res) => {
 	let body = req.body
 
-	connection.query(`INSERT INTO favoritLocation (Users_uid, Location_lid) VALUES (?, ?)`, [body.userid, body.locationid], (err, row) => {
+	connection.query(`INSERT INTO favoritLocation (Users_uid, Location_lid) VALUES (?, ?)`, [req.data.uid, body.locationid], (err, row) => {
 		if(err) res.redirect('/error/' + err.code)
 		else res.json({insertId: row.insertId, msg: 'success'})
 	})
@@ -1121,12 +1283,6 @@ app.post('/favoritlocation/insert', (req, res) => {
  *    description: "요청 경로에 패치 값을 담아 서버에 보낸다."
  *    tags: [Favoritlocation]
  *    parameters:
- *      - in: query
- *        name: uid
- *        required: true
- *        description: 유저 아이디
- *        schema:
- *          type: number
  *      - in: query
  *        name: lid
  *        required: true
@@ -1145,16 +1301,104 @@ app.post('/favoritlocation/insert', (req, res) => {
  *                  type: number
  */
 
-app.delete('/favoritlocation', (req, res) => {
+app.delete('/favoritlocation', auth, (req, res) => {
 	let sql = `DELETE FROM favoritLocation WHERE Users_uid=? AND Location_lid=?`
-	connection.query(sql, [req.query.uid, req.query.lid] , (err, row) => {
+	connection.query(sql, [req.data.uid, req.query.lid] , (err, row) => {
 		if(err) res.redirect('/error/' + err.code)
 		else res.json({affectedRows: row.affectedRows})
 	})
 })
 
+/**
+ * @swagger
+ * /recommended:
+ *  get:
+ *    summary: "장소 추천글 조회"
+ *    description: "요청 경로에 바디에 값을 담아 서버에 보낸다."
+ *    tags: [Recommended]
+ *    responses:
+ *      "200":
+ *        description: 사용자가 서버로 전달하는 값에 따라 결과 값은 다릅니다. (장소 추천글 조회 기능)
+ *        content:
+ *          application/json:
+ *            schema:
+ *              type: object
+ *              properties:
+ *              rid:
+ *                type: number
+ *              title:
+ *                type: string 
+ *              location:
+ *                type: string 
+ *              content:
+ *                type: string 
+ */
+
+app.get('/recommended', (req, res) => {
+	connection.query('SELECT * FROM recommended', (err, rows) => {
+		if(err) res.redirect('/error' + err.code)
+		else res.json(rows)
+	})
+})
+
+/**
+ * @swagger
+ * /recommended:
+ *  post:
+ *    summary: "장소 추천글 작성 기능"
+ *    description: "요청 경로에 바디에 값을 담아 서버에 보낸다."
+ *    tags: [Recommended]
+ *    requestBody:
+ *      description: 사용자가 서버로 전달하는 값에 따라 결과 값은 다릅니다. (장소 추천글 작성 기능)
+ *      required: true
+ *      content:
+ *        application/x-www-form-urlencoded:
+ *          schema:
+ *            type: object
+ *            properties:
+ *              title:
+ *                type: string 
+ *              location:
+ *                type: string 
+ *              content:
+ *                type: string 
+ *    responses:
+ *      "201":
+ *        description: 사용자가 서버로 전달하는 값에 따라 결과 값은 다릅니다. (장소 추천글 작성 기능)
+ *        content:
+ *          application/json:
+ *            schema:
+ *              type: object
+ *              properties:
+ *                insertId:
+ *                  type: number 
+ */
+
+app.post('/recommended', (req, res) => {
+	const body = req.body
+	connection.query('INSERT INTO recommended (title, location, content) VALUES(?, ?, ?)', [body.title, body.location, body.content], (err, row) => {
+		if(err) res.redirect('/error' + err.code)
+		else res.json({insertId: row.insertId})
+	})
+})
+
 // 데이터베이스 외래키 관계 확인
 
-app.listen(port, () => {
-	console.log(`server is listening at localhost:${port}`)
-});
+// app.listen(port, () => {
+// 	console.log(`server is listening at localhost:${port}`)
+// });
+
+try {
+  const option = {
+    ca: fs.readFileSync('/etc/letsencrypt/live/saessac.kro.kr/fullchain.pem'),
+    key: fs.readFileSync(path.resolve(process.cwd(), '/etc/letsencrypt/live/saessac.kro.kr/privkey.pem'), 'utf8').toString(),
+    cert: fs.readFileSync(path.resolve(process.cwd(), '/etc/letsencrypt/live/saessac.kro.kr/cert.pem'), 'utf8').toString(),
+  };
+
+  HTTPS.createServer(option, app).listen(80, () => {
+    console.log(`[HTTPS] Soda Server is started on port 80`);
+  });
+} catch (error) {
+  console.log('[HTTPS] HTTPS 오류가 발생하였습니다. HTTPS 서버는 실행되지 않습니다.');
+  console.log(error);
+}
